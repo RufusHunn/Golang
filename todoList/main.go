@@ -1,16 +1,44 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
+	"log"
 	"os"
-	"strings"
 )
 
 func check(e error) {
 	if e != nil {
 		panic(e)
 	}
+}
+
+// func save(data map[string][]byte) {
+func save(data []string) {
+	file, err := os.Create("tmp/dat1.json")
+	if err != nil {
+		log.Fatalf("failed to create file: %v", err)
+	}
+	defer file.Close()
+
+	encoder := json.NewEncoder(file)
+	if err := encoder.Encode(data); err != nil {
+		log.Fatalf("failed to encode data: %v", err)
+	}
+}
+
+func load() []string {
+	file, err := os.Open("tmp/dat1.json")
+	if err != nil {
+		log.Fatalf("failed to find file: %v", err)
+	}
+	defer file.Close()
+
+	var contents []string
+	json.NewDecoder(file).Decode(&contents)
+	fmt.Println("Found contents : ", contents)
+	return contents
 }
 
 // Run below like:
@@ -27,27 +55,9 @@ func main() {
 	fmt.Println("Item: ", *item)
 	fmt.Println("Status: ", *status)
 
-	f, err := os.Open("tmp/dat1")
-	check(err)
-	defer f.Close()
+	lines := append(load(), *item)
 
-	b1 := make([]byte, 32)
-	m1, err := f.Read(b1)
-	check(err)
-	readFileAsString := string(b1)
+	fmt.Println("Preparing to write lines: ", lines)
 
-	fmt.Println("Existing lines: ", readFileAsString, " with len ", m1)
-
-	lines := []string{readFileAsString, *item}
-	output := strings.Join(lines, "\n")
-	d1 := []byte(output)
-	fmt.Println("Preparing to write lines: ", string(d1))
-
-	// erx := os.WriteFile("tmp/dat1", d1, 0644) // This does not actually write - why?
-	erx := os.WriteFile("tmp/dat1", []byte(*item), 0644) // Writes latest input but we want all lines!
-	check(erx)
-	fmt.Println("wrote lines: ", d1)
-
-	f.Sync()
-
+	save(lines)
 }
