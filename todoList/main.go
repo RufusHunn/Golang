@@ -8,14 +8,7 @@ import (
 	"os"
 )
 
-func check(e error) {
-	if e != nil {
-		panic(e)
-	}
-}
-
-// func save(data map[string][]byte) {
-func save(data []string) {
+func save(data map[string]string) {
 	file, err := os.Create("tmp/dat1.json")
 	if err != nil {
 		log.Fatalf("failed to create file: %v", err)
@@ -28,14 +21,14 @@ func save(data []string) {
 	}
 }
 
-func load() []string {
+func load() map[string]string {
 	file, err := os.Open("tmp/dat1.json")
 	if err != nil {
 		log.Fatalf("failed to find file: %v", err)
 	}
 	defer file.Close()
 
-	var contents []string
+	var contents map[string]string
 	json.NewDecoder(file).Decode(&contents)
 	fmt.Println("Found contents : ", contents)
 	return contents
@@ -47,15 +40,26 @@ func load() []string {
 
 func main() {
 
-	item := flag.String("item", "activity", "Your activity")
-	status := flag.String("status", "not completed", "Item status")
+	item := flag.String("item", "", "Your activity")
+	status := flag.String("status", "", "Item status")
+	todelete := flag.String("delete", "", "Description to delete")
 
 	flag.Parse()
 
 	fmt.Println("Item: ", *item)
 	fmt.Println("Status: ", *status)
+	fmt.Println("Delete: ", *todelete)
 
-	lines := append(load(), *item)
+	lines := load()
+
+	_, found := lines[*todelete]
+	if found {
+		delete(lines, *todelete)
+	}
+
+	if *item != "" {
+		lines[*item] = *status
+	}
 
 	fmt.Println("Preparing to write lines: ", lines)
 
