@@ -1,42 +1,12 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
-	"log"
 	"os"
+	"os/signal"
+	"todoList/store"
 )
-
-func save(data map[string]string) {
-	file, err := os.Create("tmp/dat1.json")
-	if err != nil {
-		log.Fatalf("failed to create file: %v", err)
-	}
-	defer file.Close()
-
-	encoder := json.NewEncoder(file)
-	if err := encoder.Encode(data); err != nil {
-		log.Fatalf("failed to encode data: %v", err)
-	}
-}
-
-func load() map[string]string {
-	file, err := os.Open("tmp/dat1.json")
-	if err != nil {
-		log.Fatalf("failed to find file: %v", err)
-	}
-	defer file.Close()
-
-	var contents map[string]string
-	json.NewDecoder(file).Decode(&contents)
-	fmt.Println("Found contents : ", contents)
-	return contents
-}
-
-// Run below like:
-// go build main.go
-// ./main.exe --item='todo list' --status=completed
 
 func main() {
 
@@ -50,18 +20,14 @@ func main() {
 	fmt.Println("Status: ", *status)
 	fmt.Println("Delete: ", *todelete)
 
-	lines := load()
+	lines := store.Load()
 
-	_, found := lines[*todelete]
-	if found {
-		delete(lines, *todelete)
-	}
+	editedLines := store.ApplyFlags(lines, *item, *status, *todelete)
 
-	if *item != "" {
-		lines[*item] = *status
-	}
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt)
+	fmt.Println("App is running. Press Ctrl+C to exit...")
+	<-sigChan
 
-	fmt.Println("Preparing to write lines: ", lines)
-
-	save(lines)
+	store.Save(editedLines)
 }
