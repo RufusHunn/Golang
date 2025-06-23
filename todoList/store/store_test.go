@@ -4,31 +4,41 @@ import (
 	"testing"
 )
 
-func TestApplyFlagsCreate(t *testing.T) {
+func TestGet(t *testing.T) {
 
-	lines := map[string]string{"first": "completed"}
+	Lines = map[string]string{"first": "completed"}
 
-	// expectedLines = map[string]string {"first": "completed", "second": "in progress"}
-
-	var item string = "second"
-	var status string = "in progress"
-
-	editedLines := ApplyFlags(lines, item, status, "")
-	if len(editedLines) != 2 {
-		t.Errorf("applyFlags = %d; expected len 2", len(editedLines))
+	var found = Get("first")
+	if len(found) != 1 {
+		t.Errorf("Get = %d; expected one", len(found))
 	}
 }
 
-func TestApplyFlagsDelete(t *testing.T) {
+func TestGetNotFound(t *testing.T) {
 
-	lines := map[string]string{"to remove": "completed"}
+	Lines = map[string]string{"first": "completed"}
 
-	// expectedLines = map[string]string {}
+	var found = Get("second")
+	if len(found) != 0 {
+		t.Errorf("Get = %d; expected none", len(found))
+	}
+}
 
-	var todelete string = "to remove"
+func TestDelete(t *testing.T) {
 
-	editedLines := ApplyFlags(lines, "", "", todelete)
-	if len(editedLines) != 0 {
-		t.Errorf("applyFlags = %d; expected empty", len(editedLines))
+	Lines = map[string]string{"first": "completed"}
+
+	Delete("first")
+	if len(Lines) > 0 {
+		t.Errorf("Delete = Lines length %d; expected empty", len(Lines))
+	}
+}
+
+func TestDeleteNotFound(t *testing.T) {
+	Lines = map[string]string{"first": "completed"}
+
+	Delete("second")
+	if len(Lines) != 1 {
+		t.Errorf("Delete = Lines length %d; expected one only", len(Lines))
 	}
 }

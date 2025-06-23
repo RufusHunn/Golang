@@ -6,7 +6,9 @@ import (
 	"os"
 )
 
-func Save(data map[string]string) {
+var Lines map[string]string
+
+func Save() {
 	file, err := os.Create("tmp/dat1.json")
 	if err != nil {
 		log.Fatalf("failed to create file: %v", err)
@@ -14,12 +16,12 @@ func Save(data map[string]string) {
 	defer file.Close()
 
 	encoder := json.NewEncoder(file)
-	if err := encoder.Encode(data); err != nil {
+	if err := encoder.Encode(Lines); err != nil {
 		log.Fatalf("failed to encode data: %v", err)
 	}
 }
 
-func Load() map[string]string {
+func Load() {
 	file, err := os.Open("tmp/dat1.json")
 	if err != nil {
 		log.Fatalf("failed to find file: %v", err)
@@ -28,21 +30,33 @@ func Load() map[string]string {
 
 	var contents map[string]string
 	json.NewDecoder(file).Decode(&contents)
-	log.Println("Found file contents : ", contents)
-	return contents
+	Lines = contents
 }
 
-func ApplyFlags(lines map[string]string, item, status, todelete string) map[string]string {
-	_, found := lines[todelete]
-	if found {
-		delete(lines, todelete)
-	}
-
+func Upsert(item, status string) {
 	if item != "" {
-		lines[item] = status
+		Lines[item] = status
 	}
+}
 
-	log.Println("Updated lines: ", lines)
+func Delete(item string) {
+	_, found := Lines[item]
+	if found {
+		delete(Lines, item)
+	}
+}
 
-	return lines
+func List(item string) map[string]string {
+	return Lines
+}
+
+func Get(item string) map[string]string {
+
+	itemVal, found := Lines[item]
+	if found {
+		foundMap := make(map[string]string)
+		foundMap[item] = itemVal
+		return foundMap
+	}
+	return nil
 }
