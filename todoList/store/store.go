@@ -46,7 +46,7 @@ func Delete(item string) {
 	}
 }
 
-func List(item string) map[string]string {
+func List() map[string]string {
 	return Lines
 }
 

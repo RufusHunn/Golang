@@ -2,9 +2,9 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"todoList/store"
@@ -18,7 +18,34 @@ const (
 	traceCtxKey contextKey = iota + 1
 )
 
+var TraceIDString = uuid.New().String()
+
+func list(w http.ResponseWriter, r *http.Request) {
+	var allLines = store.List()
+	slog.InfoContext(r.Context(), fmt.Sprintf("Listing items: %s", allLines))
+}
+
+func getItem(w http.ResponseWriter, r *http.Request) {
+	var fullItem = store.Get(r.PathValue("item"))
+	slog.InfoContext(r.Context(), fmt.Sprintf("Found item: %s", fullItem))
+}
+
+func addItem(w http.ResponseWriter, r *http.Request) {
+	var description = r.PathValue("item")
+	var status = r.PathValue("status")
+	store.Upsert(description, status)
+	slog.InfoContext(r.Context(), fmt.Sprintf("Added item: %s", description))
+}
+
+func deleteItem(w http.ResponseWriter, r *http.Request) {
+	store.Delete(r.PathValue("item"))
+	slog.InfoContext(r.Context(), fmt.Sprintf("Deleting item: %s", r.PathValue("item")))
+}
+
 func main() {
+
+	ctx := context.Background()
+	ctx = context.WithValue(ctx, traceCtxKey, TraceIDString)
 
 	var handler slog.Handler
 	handler = slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
@@ -29,54 +56,48 @@ func main() {
 
 	slog.SetDefault(slog.New(handler))
 
-	ctx := context.Background()
-	ctx = context.WithValue(ctx, traceCtxKey, uuid.New().String())
+	mux := http.NewServeMux()
+	srv := &http.Server{
+		Addr:    "0.0.0.0:8080",
+		Handler: contextMiddleware(ctx, traceIDMiddleware(mux)),
+	}
 
-	action := flag.String("action", "", "Action to perform")
-	item := flag.String("item", "", "Item description")
-	status := flag.String("status", "", "Item status")
-
-	flag.Parse()
-
-	fmt.Println("Action: ", *action)
-	fmt.Println("Item: ", *item)
-	fmt.Println("Status: ", *status)
+	if err := srv.Shutdown(ctx); err != nil {
+		panic(err) // failure/timeout shutting down the server gracefully
+	}
 
 	store.Load()
 
-	switch *action {
-	case "add":
-		{
-			store.Upsert(*item, *status)
-			slog.InfoContext(ctx, fmt.Sprintf("upserting item: %s", *item))
+	slog.InfoContext(ctx, "loaded data")
+
+	mux.HandleFunc("/list", list)
+	mux.HandleFunc("/get/{item}", getItem)
+	mux.HandleFunc("/add/{item}/{status}", addItem)
+	mux.HandleFunc("/delete/{item}", deleteItem)
+
+	fs := http.FileServer(http.Dir("static"))
+	mux.Handle("/", fs)
+
+	// Below used to show a navigable directory with one static page; is this sufficient?
+	mux.HandleFunc("/about", func(w http.ResponseWriter, r *http.Request) {
+		fs := http.FileServer(http.Dir("static"))
+		mux.Handle("/", fs)
+	})
+
+	go func() {
+		if err := http.ListenAndServe(":8080", srv.Handler); err != http.ErrServerClosed {
+			panic("ListenAndServe: " + err.Error())
 		}
-	case "delete":
-		{
-			store.Delete(*item)
-			slog.InfoContext(ctx, fmt.Sprintf("deleting item: %s", *item))
-		}
-	case "list":
-		{
-			var allLines = store.List(*item)
-			slog.InfoContext(ctx, fmt.Sprintf("listing items: %s", allLines))
-		}
-	case "get":
-		{
-			var fullItem = store.Get(*item)
-			slog.InfoContext(ctx, fmt.Sprintf("Found item: %s", fullItem))
-		}
-	default:
-		fmt.Println("Invalid action")
-	}
+	}()
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt)
 	fmt.Println("App is running. Press Ctrl+C to exit...")
 	<-sig
-
+	slog.InfoContext(ctx, "saving data")
 	store.Save()
+	fmt.Println("Exiting")
 
-	slog.InfoContext(ctx, "done")
 }
 
 type MyHandler struct {
@@ -89,4 +110,23 @@ func (h MyHandler) Handle(ctx context.Context, r slog.Record) error {
 	}
 
 	return h.Handler.Handle(ctx, r)
+}
+
+func traceIDMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		traceIdFromHeader := r.Header["Traceid"]
+		if len(traceIdFromHeader) != 0 {
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), traceCtxKey, traceIdFromHeader[0])))
+		} else {
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), traceCtxKey, uuid.New().String())))
+		}
+	})
+}
+
+func contextMiddleware(ctx context.Context, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rctx, cancel := context.WithCancel(r.Context())
+		context.AfterFunc(ctx, cancel)
+		next.ServeHTTP(w, r.WithContext(rctx))
+	})
 }
