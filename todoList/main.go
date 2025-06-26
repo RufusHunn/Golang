@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"text/template"
 	"todoList/store"
 
 	"github.com/google/uuid"
@@ -19,11 +20,6 @@ const (
 )
 
 var TraceIDString = uuid.New().String()
-
-func list(w http.ResponseWriter, r *http.Request) {
-	var allLines = store.List()
-	slog.InfoContext(r.Context(), fmt.Sprintf("Listing items: %s", allLines))
-}
 
 func getItem(w http.ResponseWriter, r *http.Request) {
 	var fullItem = store.Get(r.PathValue("item"))
@@ -40,6 +36,31 @@ func addItem(w http.ResponseWriter, r *http.Request) {
 func deleteItem(w http.ResponseWriter, r *http.Request) {
 	store.Delete(r.PathValue("item"))
 	slog.InfoContext(r.Context(), fmt.Sprintf("Deleting item: %s", r.PathValue("item")))
+}
+
+func renderHTMLTable(w http.ResponseWriter, data map[string]string) {
+	const tpl = `
+    <html>
+    <head><title>View</title></head>
+    <body>
+        <h1>Todos</h1>
+        <table border="1" cellpadding="5">
+            <tr><th>Description</th><th>Status</th></tr>
+            {{range $key, $value := .}}
+                <tr>
+                    <td>{{$key}}</td>
+                    <td>{{$value}}</td>
+                </tr>
+            {{end}}
+        </table>
+    </body>
+    </html>
+    `
+
+	tmpl := template.Must(template.New("table").Parse(tpl))
+	if err := tmpl.Execute(w, data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func main() {
@@ -70,18 +91,18 @@ func main() {
 
 	slog.InfoContext(ctx, "loaded data")
 
-	mux.HandleFunc("/list", list)
+	// mux.HandleFunc("/list", list)
 	mux.HandleFunc("/get/{item}", getItem)
 	mux.HandleFunc("/add/{item}/{status}", addItem)
 	mux.HandleFunc("/delete/{item}", deleteItem)
 
+	// Below shows a navigable directory with one static page; is this sufficient?
 	fs := http.FileServer(http.Dir("static"))
-	mux.Handle("/", fs)
+	mux.Handle("/about/", http.StripPrefix("/about", fs))
 
-	// Below used to show a navigable directory with one static page; is this sufficient?
-	mux.HandleFunc("/about", func(w http.ResponseWriter, r *http.Request) {
-		fs := http.FileServer(http.Dir("static"))
-		mux.Handle("/", fs)
+	// Dynamic webpage
+	mux.HandleFunc("/list", func(w http.ResponseWriter, r *http.Request) {
+		renderHTMLTable(w, store.List())
 	})
 
 	go func() {
