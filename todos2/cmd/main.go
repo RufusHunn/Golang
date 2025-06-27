@@ -8,7 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"text/template"
-	"todoList/store"
+	"todos2/store"
 
 	"github.com/google/uuid"
 )
@@ -35,10 +35,11 @@ func addItem(w http.ResponseWriter, r *http.Request) {
 }
 
 func updateItem(w http.ResponseWriter, r *http.Request) {
+	var ix = r.PathValue("ix")
 	var description = r.PathValue("item")
 	var status = r.PathValue("status")
 	fmt.Printf("Store lines are currently: %s", store.Lines)
-	store.Update(description, status)
+	store.Update(ix, description, status)
 	slog.InfoContext(r.Context(), fmt.Sprintf("Updated item: %s", description))
 }
 
@@ -47,19 +48,21 @@ func deleteItem(w http.ResponseWriter, r *http.Request) {
 	slog.InfoContext(r.Context(), fmt.Sprintf("Deleting item: %s", r.PathValue("item")))
 }
 
-func renderHTMLTable(w http.ResponseWriter, data map[string]string) {
+func renderHTMLTable(w http.ResponseWriter, data map[string]store.Task) {
 	const tpl = `
+    <!DOCTYPE html>
     <html>
-    <head><title>View</title></head>
+    <head><title>Tasks Table</title></head>
     <body>
-        <h1>Todos</h1>
-        <table border="1" cellpadding="5">
-            <tr><th>Description</th><th>Status</th></tr>
-            {{range $key, $value := .}}
-                <tr>
-                    <td>{{$key}}</td>
-                    <td>{{$value}}</td>
-                </tr>
+        <h1>Tasks</h1>
+        <table border="1" cellpadding="6" cellspacing="0">
+            <tr><th>ID</th><th>Description</th><th>Status</th></tr>
+            {{range $id, $task := .}}
+            <tr>
+                <td>{{$id}}</td>
+                <td>{{$task.Description}}</td>
+                <td>{{$task.Status}}</td>
+            </tr>
             {{end}}
         </table>
     </body>
@@ -67,9 +70,7 @@ func renderHTMLTable(w http.ResponseWriter, data map[string]string) {
     `
 
 	tmpl := template.Must(template.New("table").Parse(tpl))
-	if err := tmpl.Execute(w, data); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+	tmpl.Execute(w, data)
 }
 
 func main() {
@@ -98,12 +99,13 @@ func main() {
 
 	store.Load()
 
+	fmt.Println("Lines loaded: ", store.Lines)
+
 	slog.InfoContext(ctx, "loaded data")
 
-	// mux.HandleFunc("/list", list)
 	mux.HandleFunc("/get/{item}", getItem)
 	mux.HandleFunc("/create/{item}/{status}", addItem)
-	mux.HandleFunc("/update/{item}/{status}", updateItem)
+	mux.HandleFunc("/update/{ix}/{item}/{status}", updateItem)
 	mux.HandleFunc("/delete/{item}", deleteItem)
 
 	// Below shows a navigable directory with one static page; is this sufficient?

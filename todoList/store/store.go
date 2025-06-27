@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"os"
 )
@@ -14,7 +15,6 @@ func Save() {
 		log.Fatalf("failed to create file: %v", err)
 	}
 	defer file.Close()
-
 	encoder := json.NewEncoder(file)
 	if err := encoder.Encode(Lines); err != nil {
 		log.Fatalf("failed to encode data: %v", err)
@@ -33,10 +33,23 @@ func Load() {
 	Lines = contents
 }
 
-func Upsert(item, status string) {
+func Create(item, status string) error {
+	if Lines[item] != "" {
+		return errors.New("item already exists")
+	}
 	if item != "" {
 		Lines[item] = status
 	}
+	return nil
+}
+func Update(item, status string) error {
+	if Lines[item] == "" {
+		return errors.New("item does not exist")
+	}
+	if item != "" {
+		Lines[item] = status
+	}
+	return nil
 }
 
 func Delete(item string) {
