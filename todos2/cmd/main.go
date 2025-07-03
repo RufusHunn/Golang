@@ -23,7 +23,9 @@ const (
 
 var TraceIDString = uuid.New().String()
 
-var Tasks map[string]store.Task
+var Tasks map[string]store.Task = make(map[string]store.Task)
+
+var TaskChan chan TaskMessage = make(chan TaskMessage)
 
 type TaskMessage struct {
 	Action   string
@@ -33,6 +35,9 @@ type TaskMessage struct {
 }
 
 func generateID() string {
+	if len(Tasks) == 0 {
+		return "1"
+	}
 
 	keys := make([]int, 0, len(Tasks))
 	for k := range Tasks {
@@ -43,46 +48,35 @@ func generateID() string {
 	return fmt.Sprintf("%d", nextKey)
 }
 
-func getItem(ch chan TaskMessage) http.HandlerFunc {
+// Handler layer below
+
+func getItem() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("ix")
-		resp := make(chan interface{})
-		ch <- TaskMessage{Action: "read", Key: id, Response: resp}
-		result := <-resp
+		result := getData(r.PathValue("ix"))
 
 		if result == nil {
 			http.NotFound(w, r)
 			return
 		}
-
 		json.NewEncoder(w).Encode(result)
-		slog.InfoContext(r.Context(), fmt.Sprintf("Retrieved item: %s", id))
+		slog.InfoContext(r.Context(), fmt.Sprintf("Retrieved item: %s", r.PathValue("ix")))
 	}
 }
 
-func addItem(ch chan TaskMessage) http.HandlerFunc {
+func addItem() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var description = r.PathValue("description")
 		var status = r.PathValue("status")
 		if description != "" && status != "" {
-			var task = store.Task{Description: description, Status: status}
-			id := generateID()
-			resp := make(chan interface{})
-			ch <- TaskMessage{Action: "create", Key: id, Payload: task, Response: resp}
-			<-resp
-			slog.InfoContext(r.Context(), fmt.Sprintf("Added item: %s", description))
+			addData(description, status)
+			slog.InfoContext(r.Context(), fmt.Sprintf("Added new item with description: %s", description))
 		}
 	}
 }
 
-func updateItem(ch chan TaskMessage) http.HandlerFunc {
+func updateItem() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("ix")
-		var task = store.Task{Description: r.PathValue("description"), Status: r.PathValue("status")}
-
-		resp := make(chan interface{})
-		ch <- TaskMessage{Action: "update", Key: id, Payload: task, Response: resp}
-		result := <-resp
+		result := updateData(r.PathValue("ix"), r.PathValue("description"), r.PathValue("status"))
 
 		if result == nil {
 			http.NotFound(w, r)
@@ -90,16 +84,13 @@ func updateItem(ch chan TaskMessage) http.HandlerFunc {
 		}
 
 		w.WriteHeader(http.StatusOK)
-		slog.InfoContext(r.Context(), fmt.Sprintf("Updated item: %s", id))
+		slog.InfoContext(r.Context(), fmt.Sprintf("Updated item: %s", r.PathValue("ix")))
 	}
 }
 
-func deleteItem(ch chan TaskMessage) http.HandlerFunc {
+func deleteItem() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("ix")
-		resp := make(chan interface{})
-		ch <- TaskMessage{Action: "delete", Key: id, Response: resp}
-		result := <-resp
+		result := deleteData(r.PathValue("ix"))
 
 		if result == nil {
 			http.NotFound(w, r)
@@ -107,8 +98,55 @@ func deleteItem(ch chan TaskMessage) http.HandlerFunc {
 		}
 
 		w.WriteHeader(http.StatusNoContent)
-		slog.InfoContext(r.Context(), fmt.Sprintf("Deleted item: %s", id))
+		slog.InfoContext(r.Context(), fmt.Sprintf("Deleted item: %s", r.PathValue("ix")))
 	}
+}
+
+// Complex Layer Below
+
+func getData(key string) interface{} {
+	resp := make(chan interface{})
+	TaskChan <- TaskMessage{Action: "read", Key: key, Response: resp}
+	result := <-resp
+	return result
+}
+
+func addData(description, status string) {
+	var task = store.Task{Description: description, Status: status}
+	id := generateID()
+	resp := make(chan interface{})
+	TaskChan <- TaskMessage{Action: "create", Key: id, Payload: task, Response: resp}
+	<-resp
+}
+
+func updateData(id, description, status string) interface{} {
+	var task = store.Task{Description: description, Status: status}
+	resp := make(chan interface{})
+	TaskChan <- TaskMessage{Action: "update", Key: id, Payload: task, Response: resp}
+	result := <-resp
+	return result
+}
+
+func deleteData(key string) interface{} {
+	resp := make(chan interface{})
+	TaskChan <- TaskMessage{Action: "delete", Key: key, Response: resp}
+	result := <-resp
+	return result
+}
+
+// Data layer below
+
+func create(key string, payload store.Task) {
+	Tasks[key] = payload
+}
+
+func read(key string) (store.Task, bool) {
+	task, ok := Tasks[key]
+	return task, ok
+}
+
+func del(key string) {
+	delete(Tasks, key)
 }
 
 func renderHTMLTable(w http.ResponseWriter) {
@@ -161,14 +199,13 @@ func main() {
 	}
 
 	// Set up TaskMessage channel, load data and run actor goroutine
-	taskChan := make(chan TaskMessage)
 	Tasks = store.Load()
-	go taskActor(taskChan, Tasks)
+	go taskActor()
 
-	mux.HandleFunc("/get/{ix}", getItem(taskChan))
-	mux.HandleFunc("/create/{description}/{status}", addItem(taskChan))
-	mux.HandleFunc("/update/{ix}/{description}/{status}", updateItem(taskChan))
-	mux.HandleFunc("/delete/{ix}", deleteItem(taskChan))
+	mux.HandleFunc("/get/{ix}", getItem())
+	mux.HandleFunc("/create/{description}/{status}", addItem())
+	mux.HandleFunc("/update/{ix}/{description}/{status}", updateItem())
+	mux.HandleFunc("/delete/{ix}", deleteItem())
 
 	// Below shows a navigable directory with one static page; is this sufficient?
 	fs := http.FileServer(http.Dir("static"))
@@ -195,38 +232,38 @@ func main() {
 
 }
 
-func taskActor(ch chan TaskMessage, tasks map[string]store.Task) {
+func taskActor() {
 
-	for msg := range ch {
+	for msg := range TaskChan {
 		switch msg.Action {
 		case "create":
-			tasks[msg.Key] = msg.Payload
+			create(msg.Key, msg.Payload)
 			msg.Response <- true
 		case "read":
-			task, ok := tasks[msg.Key]
+			task, ok := read(msg.Key)
 			if ok {
 				msg.Response <- task
 			} else {
 				msg.Response <- nil
 			}
 		case "update":
-			_, exists := tasks[msg.Key]
+			_, exists := Tasks[msg.Key]
 			if exists {
-				tasks[msg.Key] = msg.Payload
+				create(msg.Key, msg.Payload)
 				msg.Response <- true
 			} else {
 				msg.Response <- nil
 			}
 		case "delete":
-			_, exists := tasks[msg.Key]
+			_, exists := Tasks[msg.Key]
 			if exists {
-				delete(tasks, msg.Key)
+				del(msg.Key)
 				msg.Response <- true
 			} else {
 				msg.Response <- nil
 			}
 		case "list":
-			msg.Response <- tasks
+			msg.Response <- Tasks
 		}
 	}
 }
