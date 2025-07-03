@@ -23,7 +23,7 @@ const (
 
 var TraceIDString = uuid.New().String()
 
-var Lines map[string]store.Task
+var Tasks map[string]store.Task
 
 type TaskMessage struct {
 	Action   string
@@ -34,8 +34,8 @@ type TaskMessage struct {
 
 func generateID() string {
 
-	keys := make([]int, 0, len(Lines))
-	for k := range Lines {
+	keys := make([]int, 0, len(Tasks))
+	for k := range Tasks {
 		ik, _ := strconv.Atoi(k)
 		keys = append(keys, ik)
 	}
@@ -70,7 +70,7 @@ func addItem(ch chan TaskMessage) http.HandlerFunc {
 			resp := make(chan interface{})
 			ch <- TaskMessage{Action: "create", Key: id, Payload: task, Response: resp}
 			<-resp
-			slog.InfoContext(r.Context(), fmt.Sprintf("Added item: %s", id))
+			slog.InfoContext(r.Context(), fmt.Sprintf("Added item: %s", description))
 		}
 	}
 }
@@ -133,7 +133,7 @@ func renderHTMLTable(w http.ResponseWriter) {
     `
 
 	tmpl := template.Must(template.New("table").Parse(tpl))
-	tmpl.Execute(w, Lines)
+	tmpl.Execute(w, Tasks)
 }
 
 func main() {
@@ -162,8 +162,8 @@ func main() {
 
 	// Set up TaskMessage channel, load data and run actor goroutine
 	taskChan := make(chan TaskMessage)
-	Lines = store.Load()
-	go taskActor(taskChan)
+	Tasks = store.Load()
+	go taskActor(taskChan, Tasks)
 
 	mux.HandleFunc("/get/{ix}", getItem(taskChan))
 	mux.HandleFunc("/create/{description}/{status}", addItem(taskChan))
@@ -190,13 +190,12 @@ func main() {
 	fmt.Println("App is running. Press Ctrl+C to exit...")
 	<-sig
 	slog.InfoContext(ctx, "Saving data")
-	store.Save(Lines)
+	store.Save(Tasks)
 	fmt.Println("Exiting")
 
 }
 
-func taskActor(ch chan TaskMessage) {
-	tasks := Lines
+func taskActor(ch chan TaskMessage, tasks map[string]store.Task) {
 
 	for msg := range ch {
 		switch msg.Action {
