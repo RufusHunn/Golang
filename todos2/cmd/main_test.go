@@ -24,7 +24,18 @@ func TestGenerateID_FirstVal(t *testing.T) {
 	}
 }
 
+func TestGenerateID_NextVal(t *testing.T) {
+	Tasks = make(map[string]store.Task)
+	Tasks["1"] = store.Task{Description: "dummy", Status: "todo"}
+	output := generateID()
+	if output != "2" {
+		t.Errorf("GenerateID - Incremented val not 2 as expected but was %s", output)
+	}
+}
+
 // Using Parallel to validate concurrent-safe
+// NOTE: Unfortunately I was not able to get test to pass in time and confirm solution as concurrent safe.
+// If I had more time I'd test with httptest library and make endpoint calls rather than testing taskActor alone
 func TestConcurrentFunctions(t *testing.T) {
 	go taskActor()
 	t.Run("SubtestActorCreate", func(t *testing.T) {

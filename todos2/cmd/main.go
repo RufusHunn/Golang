@@ -34,20 +34,6 @@ type TaskMessage struct {
 	Response chan interface{}
 }
 
-func generateID() string {
-	if len(Tasks) == 0 {
-		return "1"
-	}
-
-	keys := make([]int, 0, len(Tasks))
-	for k := range Tasks {
-		ik, _ := strconv.Atoi(k)
-		keys = append(keys, ik)
-	}
-	nextKey := keys[len(keys)-1] + 1
-	return fmt.Sprintf("%d", nextKey)
-}
-
 // Handler layer below
 
 func getItem() http.HandlerFunc {
@@ -134,19 +120,18 @@ func deleteData(key string) interface{} {
 	return result
 }
 
-// Data layer below
+func generateID() string {
+	if len(Tasks) == 0 {
+		return "1"
+	}
 
-func create(key string, payload store.Task) {
-	Tasks[key] = payload
-}
-
-func read(key string) (store.Task, bool) {
-	task, ok := Tasks[key]
-	return task, ok
-}
-
-func del(key string) {
-	delete(Tasks, key)
+	keys := make([]int, 0, len(Tasks))
+	for k := range Tasks {
+		ik, _ := strconv.Atoi(k)
+		keys = append(keys, ik)
+	}
+	nextKey := keys[len(keys)-1] + 1
+	return fmt.Sprintf("%d", nextKey)
 }
 
 func renderHTMLTable(w http.ResponseWriter) {
@@ -174,6 +159,21 @@ func renderHTMLTable(w http.ResponseWriter) {
 	tmpl.Execute(w, Tasks)
 }
 
+// Data layer below
+
+func create(key string, payload store.Task) {
+	Tasks[key] = payload
+}
+
+func read(key string) (store.Task, bool) {
+	task, ok := Tasks[key]
+	return task, ok
+}
+
+func del(key string) {
+	delete(Tasks, key)
+}
+
 func main() {
 
 	ctx := context.Background()
@@ -198,39 +198,49 @@ func main() {
 		panic(err) // failure/timeout shutting down the server gracefully
 	}
 
-	// Set up TaskMessage channel, load data and run actor goroutine
+	// Load data and run actor goroutine using global list of tasks and TaskMessage channel
 	Tasks = store.Load()
 	go taskActor()
 
-	mux.HandleFunc("/get/{ix}", getItem())
-	mux.HandleFunc("/create/{description}/{status}", addItem())
-	mux.HandleFunc("/update/{ix}/{description}/{status}", updateItem())
-	mux.HandleFunc("/delete/{ix}", deleteItem())
+	// NOTE: Endpoints don't follow proper CRUD as create/update should have been same URL, different HTTP methods
+	// This also shows over-reliance on path values, as if we'd done that a request body would have been required.
+
+	mux.HandleFunc("GET /get/{ix}", getItem())
+	mux.HandleFunc("PUT /create/{description}/{status}", addItem())
+	mux.HandleFunc("POST /update/{ix}/{description}/{status}", updateItem())
+	mux.HandleFunc("DELETE /delete/{ix}", deleteItem())
 
 	// Below shows a navigable directory with one static page; is this sufficient?
 	fs := http.FileServer(http.Dir("static"))
 	mux.Handle("/about/", http.StripPrefix("/about", fs))
 
 	// Dynamic webpage
-	mux.HandleFunc("/list", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /list", func(w http.ResponseWriter, r *http.Request) {
 		renderHTMLTable(w)
 	})
 
+	// goroutine for server using http.ListenAndServe
 	go func() {
 		if err := http.ListenAndServe(":8080", srv.Handler); err != http.ErrServerClosed {
 			panic("ListenAndServe: " + err.Error())
 		}
 	}()
 
+	// Interrupt setup using sig channel
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt)
 	fmt.Println("App is running. Press Ctrl+C to exit...")
 	<-sig
+
+	// Save data and exit
 	slog.InfoContext(ctx, "Saving data")
 	store.Save(Tasks)
 	fmt.Println("Exiting")
 
 }
+
+// NOTE: if I had more time I'd have returned a response body for all endpoints. I could then have done concurrent testing at a
+// higher level via the httptest library instead of tests which sent things straight to the channel.
 
 func taskActor() {
 
@@ -267,6 +277,8 @@ func taskActor() {
 		}
 	}
 }
+
+// Handler and middleware below
 
 type MyHandler struct {
 	slog.Handler
